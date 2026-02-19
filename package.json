@@ -1,0 +1,54 @@
+{
+  "name": "interview-bot-backend",
+  "version": "1.0.0",
+  "description": "Backend for Interview Bot AI with authentication and chat storage",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "setup": "node setup.js",
+    "debug-env": "node debug-env.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "interview",
+    "bot",
+    "ai",
+    "express",
+    "mongodb"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@deepgram/sdk": "^4.11.3",
+    "bcrypt": "^6.0.0",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.1.5",
+    "express-validator": "^7.0.1",
+    "form-data": "^4.0.0",
+    "google-auth-library": "^10.3.0",
+    "groq-sdk": "^0.8.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mammoth": "^1.11.0",
+    "mongodb": "^6.18.0",
+    "mongoose": "^8.0.3",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "openai": "^6.16.0",
+    "nodemailer": "^6.9.3",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "pdf-parse": "^2.4.5",
+    "razorpay": "^2.9.6",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
