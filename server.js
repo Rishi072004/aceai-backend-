@@ -39,7 +39,17 @@ app.use(helmet());
 
 // CORS configuration
 app.use(cors({
-  origin: ['http://localhost:5173', 'http://localhost:3000', 'http://localhost:8081', 'http://127.0.0.1:5173', 'http://127.0.0.1:3000', 'http://127.0.0.1:8081'],
+  origin: [
+    'http://localhost:5173', 
+    'http://localhost:3000', 
+    'http://localhost:8081', 
+    'http://127.0.0.1:5173', 
+    'http://127.0.0.1:3000', 
+    'http://127.0.0.1:8081',
+    'https://aceai-frontend.vercel.app',
+    'https://aceai-frontend-git-main-rishi072004s-projects.vercel.app',
+    'https://aceai-frontend-mzfngq3q3-rishi072004s-projects.vercel.app'
+  ],
   credentials: true
 }));
 // Rate limiting
