@@ -1,5 +1,5 @@
 import express from 'express';
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import dotenv from 'dotenv';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
@@ -8,30 +8,13 @@ dotenv.config();
 
 const router = express.Router();
 
-// Create transporter once using env vars
-const transportOptions = {
-  host: process.env.SMTP_HOST,
-  port: process.env.SMTP_PORT ? Number(process.env.SMTP_PORT) : undefined,
-  secure: process.env.SMTP_SECURE === 'true', // true for 465, false for other ports
-  auth: {
-    user: process.env.SMTP_USER,
-    pass: process.env.SMTP_PASS,
-  },
-};
+// Initialize Resend
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
 
-let transporter;
-try {
-  transporter = nodemailer.createTransport(transportOptions);
-  // Verify transporter at startup to catch config problems early
-  transporter.verify()
-    .then(() => {
-      console.log('Nodemailer transporter verified successfully');
-    })
-    .catch((err) => {
-      console.error('Nodemailer transporter verification failed:', err);
-    });
-} catch (err) {
-  console.error('Failed to create nodemailer transporter', err);
+if (resend) {
+  console.log('Resend email service initialized');
+} else {
+  console.warn('RESEND_API_KEY not configured - emails will not be sent');
 }
 
 // Helper to attempt to resolve userId from Authorization header (optional)
@@ -106,29 +89,23 @@ router.post('/', async (req, res) => {
     // Send response early to avoid blocking; send the email asynchronously
     res.status(200).json({ status: 'success', message: 'Feedback received' });
 
-    // If transporter is available and ADMIN_EMAIL is configured, send email in background
-    if (transporter && process.env.ADMIN_EMAIL) {
-      transporter.sendMail({
-        from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    // If Resend is available and ADMIN_EMAIL is configured, send email in background
+    if (resend && process.env.ADMIN_EMAIL) {
+      resend.emails.send({
+        from: 'AceAI Feedback <onboarding@resend.dev>',
         to: process.env.ADMIN_EMAIL,
         subject,
         text: plainBody,
         html: htmlBody,
       })
-      .then(info => {
-        console.log('Feedback email send response:', info);
-        // nodemailer info can contain accepted/rejected arrays depending on transport
-        if (info.accepted) console.log('Accepted recipients:', info.accepted);
-        if (info.rejected) console.warn('Rejected recipients:', info.rejected);
-        if (info.rejected && info.rejected.length) {
-          console.warn('Some recipients were rejected; check SMTP credentials and ADMIN_EMAIL');
-        }
+      .then(response => {
+        console.log('Feedback email sent via Resend:', response);
       })
       .catch(err => {
-        console.error('Failed to send feedback email:', err);
+        console.error('Failed to send feedback email via Resend:', err);
       });
     } else {
-      if (!transporter) console.warn('Email not sent: transporter not configured');
+      if (!resend) console.warn('Email not sent: RESEND_API_KEY not configured');
       if (!process.env.ADMIN_EMAIL) console.warn('Email not sent: ADMIN_EMAIL not configured');
     }
 
@@ -141,9 +118,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-export default router;
-
-// Test-only endpoint to trigger a test email and show transporter status.
+// Test-only endpoint to trigger a test email and show Resend status.
 // Protected by TEST_EMAIL_KEY when set and disabled in production unless a key is provided.
 router.get('/test-email', async (req, res) => {
   try {
@@ -157,34 +132,32 @@ router.get('/test-email', async (req, res) => {
       return res.status(401).json({ status: 'error', message: 'Invalid test key' });
     }
 
-    if (!transporter) {
-      return res.status(500).json({ status: 'error', message: 'Email transporter not configured' });
+    if (!resend) {
+      return res.status(500).json({ status: 'error', message: 'Resend not configured - add RESEND_API_KEY' });
     }
 
-    // verify transporter before sending
-    try {
-      await transporter.verify();
-    } catch (vErr) {
-      console.error('Transporter verify failed on test:', vErr);
-      return res.status(500).json({ status: 'error', message: 'Transporter verification failed', detail: vErr.message });
+    if (!process.env.ADMIN_EMAIL) {
+      return res.status(500).json({ status: 'error', message: 'ADMIN_EMAIL not configured' });
     }
 
     const testTimestamp = new Date().toISOString();
     const subject = `Test feedback email at ${testTimestamp}`;
-    const text = `This is a test feedback email sent at ${testTimestamp}. If you receive this, transporter and SMTP settings are correct.`;
+    const text = `This is a test feedback email sent at ${testTimestamp}. If you receive this, Resend is working correctly.`;
 
-    const info = await transporter.sendMail({
-      from: process.env.SMTP_FROM || process.env.SMTP_USER,
+    const response = await resend.emails.send({
+      from: 'AceAI Feedback <onboarding@resend.dev>',
       to: process.env.ADMIN_EMAIL,
       subject,
       text,
     });
 
-    console.log('Test email send info:', info);
+    console.log('Test email send response:', response);
 
-    return res.status(200).json({ status: 'success', info });
+    return res.status(200).json({ status: 'success', response });
   } catch (err) {
     console.error('Error sending test email:', err);
     return res.status(500).json({ status: 'error', message: 'Failed to send test email', detail: err.message });
   }
 });
+
+export default router;
