@@ -204,6 +204,84 @@ export function initializeVoiceStreamWebSocket(server) {
      */
     const generateAIResponse = async (userAnswer, ws, context) => {
       try {
+        // Check for clarification requests (repeat, elaborate, etc.)
+        const answerLower = (userAnswer || '').toLowerCase().trim();
+        
+        // Detect "skip/move on" patterns
+        const skipPatterns = [
+          /^(let'?s?\s+)?move\s+on/i, /^next\s+(question|one)/i,
+          /^skip\s+(this|it|that)/i, /^(can\s+we\s+)?go\s+to\s+(the\s+)?next/i,
+          /^(let'?s?\s+)?proceed/i, /^another\s+question/i, /^new\s+question/i
+        ];
+        
+        const isSkipRequest = skipPatterns.some(p => p.test(answerLower));
+        
+        const clarificationPatterns = [
+          /repeat/i, /say\s+(that\s+)?again/i, /come\s+again/i,
+          /didn'?t\s+(hear|understand|get|catch)/i, /pardon/i,
+          /what\s+(did\s+you|was\s+that)/i, /could\s+you\s+(please\s+)?(repeat|say)/i,
+          /one\s+more\s+time/i, /again\s*\??$/i
+        ];
+        
+        const elaborationPatterns = [
+          /elaborate/i, /explain\s+(more|further|that)/i, /clarif(y|ication)/i,
+          /more\s+(detail|specific|context)/i, /what\s+do\s+you\s+mean/i,
+          /rephrase/i, /different\s+way/i
+        ];
+        
+        const isRepeatRequest = !isSkipRequest && clarificationPatterns.some(p => p.test(answerLower));
+        const isElaborateRequest = !isSkipRequest && elaborationPatterns.some(p => p.test(answerLower));
+        
+        // Handle skip request - don't process as clarification, let it flow to generate new question
+        if (isSkipRequest) {
+          console.log('⏭️ Voice: Skip request detected - generating fresh question');
+          userAnswer = '[SKIP_REQUEST]'; // Mark for fresh question generation
+        }
+        
+        if (isRepeatRequest || isElaborateRequest) {
+          console.log('🔄 Voice: Clarification request detected:', isRepeatRequest ? 'REPEAT' : 'ELABORATE');
+          
+          // Find last assistant message (last question)
+          let lastQuestion = null;
+          for (let i = context.conversationHistory.length - 1; i >= 0; i--) {
+            if (context.conversationHistory[i].role === 'assistant') {
+              // Extract question from the formatted response
+              const content = context.conversationHistory[i].content;
+              const qMatch = content.match(/\[QUESTION:\s*([^\]]+)\]/);
+              lastQuestion = qMatch ? qMatch[1].trim() : content;
+              break;
+            }
+          }
+          
+          if (lastQuestion) {
+            let responseText;
+            if (isRepeatRequest) {
+              responseText = `[FEEDBACK: Sure]\n[QUESTION: ${lastQuestion}]`;
+            } else {
+              // Simple rephrase
+              responseText = `[FEEDBACK: Of course]\n[QUESTION: Let me rephrase: ${lastQuestion}]`;
+            }
+            
+            // Stream the clarification response
+            for (const char of responseText) {
+              ws.send(JSON.stringify({
+                type: 'ai_response_chunk',
+                content: char,
+                timestamp: Date.now()
+              }));
+              await new Promise(r => setTimeout(r, 10));
+            }
+            
+            ws.send(JSON.stringify({
+              type: 'ai_response_complete',
+              fullResponse: responseText,
+              timestamp: Date.now()
+            }));
+            
+            return responseText;
+          }
+        }
+
         // Build conversation context
         const systemPrompt = `You are an AI interviewer conducting a ${context.mode} difficulty interview for ${context.jobContext.jobTitle || 'a position'} at ${context.jobContext.company || 'the company'}.
 
@@ -217,10 +295,15 @@ export function initializeVoiceStreamWebSocket(server) {
       [FEEDBACK: <1-2 words>]
       [QUESTION: <your next question>]`;
 
+        // Handle skip request - generate fresh question
+        const actualMessage = userAnswer === '[SKIP_REQUEST]'
+          ? 'The candidate wants to move on to a different topic. Ask a NEW interview question about a different aspect of the job. Do NOT reference the previous question.'
+          : userAnswer;
+
         const messages = [
           { role: 'system', content: systemPrompt },
           ...context.conversationHistory,
-          { role: 'user', content: userAnswer }
+          { role: 'user', content: actualMessage }
         ];
 
         // Stream response from LLM (OpenAI default, Groq optional)

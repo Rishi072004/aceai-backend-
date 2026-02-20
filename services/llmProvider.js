@@ -21,14 +21,14 @@ const createGroqAdapter = () => {
   }
     const mapModelToGroq = (model) => {
       // Default to known-good Groq chat model
-      const fallback = 'groq/compound';
+      const fallback = 'llama-3.3-70b-versatile';
       if (!model) return fallback;
 
       const normalized = model.toLowerCase();
       const mapping = {
-        'gpt-4o-mini': fallback,
-        'gpt-4o': fallback,
-        'gpt-4': fallback,
+        'gpt-4o-mini': 'llama-3.1-8b-instant',
+        'gpt-4o': 'llama-3.3-70b-versatile',
+        'gpt-4': 'llama-3.3-70b-versatile',
         'gpt-3.5-turbo': 'mixtral-8x7b-32768',
         'gpt-3.5-turbo-0125': 'mixtral-8x7b-32768'
       };

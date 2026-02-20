@@ -776,6 +776,210 @@ Reference them when relevant but always relate to the candidate's PAST EXPERIENC
       });
     }
 
+    // =========================================================================
+    // HANDLE CLARIFICATION REQUESTS (repeat, elaborate, clarify, etc.)
+    // =========================================================================
+    const userAnswerLower = (userAnswer || '').toLowerCase().trim();
+    
+    // Detect "skip/move on" patterns - user wants to move to next question
+    const skipPatterns = [
+      /^(let'?s?\s+)?move\s+on/i,
+      /^next\s+(question|one)/i,
+      /^skip\s+(this|it|that)/i,
+      /^(can\s+we\s+)?go\s+to\s+(the\s+)?next/i,
+      /^(let'?s?\s+)?proceed/i,
+      /^(i'?d?\s+)?(like\s+to\s+)?skip/i,
+      /^another\s+question/i,
+      /^new\s+question/i,
+      /^change\s+(the\s+)?(topic|question)/i,
+    ];
+    
+    const isSkipRequest = skipPatterns.some(p => p.test(userAnswerLower));
+    
+    if (isSkipRequest) {
+      console.log('⏭️ Skip/move-on request detected - will generate fresh question');
+      // Don't return here - let it flow through to generate a new question
+      // But mark that we should ignore the user's message content for question generation
+      req.body.userAnswer = '[SKIP_REQUEST]'; // Signal to generate fresh question
+    }
+    
+    // Detect clarification request patterns
+    const clarificationPatterns = [
+      /repeat/i,
+      /say\s+(that\s+)?again/i,
+      /come\s+again/i,
+      /didn'?t\s+(hear|understand|get|catch)/i,
+      /can'?t\s+(hear|understand)/i,
+      /pardon/i,
+      /what\s+(did\s+you|was\s+that)/i,
+      /could\s+you\s+(please\s+)?(repeat|say)/i,
+      /one\s+more\s+time/i,
+      /again\s*\??$/i,
+    ];
+    
+    const elaborationPatterns = [
+      /elaborate/i,
+      /explain\s+(more|further|that)/i,
+      /clarif(y|ication)/i,
+      /more\s+(detail|specific|context)/i,
+      /what\s+do\s+you\s+mean/i,
+      /can\s+you\s+(be\s+more\s+)?specific/i,
+      /not\s+sure\s+(what|i)\s+understand/i,
+      /rephrase/i,
+      /different\s+way/i,
+    ];
+    
+    const isRepeatRequest = !isSkipRequest && clarificationPatterns.some(p => p.test(userAnswerLower));
+    const isElaborateRequest = !isSkipRequest && elaborationPatterns.some(p => p.test(userAnswerLower));
+    
+    if (isRepeatRequest || isElaborateRequest) {
+      console.log('🔄 Clarification request detected:', isRepeatRequest ? 'REPEAT' : 'ELABORATE');
+      console.log('📋 Conversation length:', conversation?.length || 0);
+      
+      // Find the last ACTUAL question asked from conversation history
+      // Skip short feedback messages like "Good", "Nice", "Solid"
+      let lastQuestion = null;
+      if (conversation && conversation.length > 0) {
+        // Look for the last assistant message that looks like a question
+        // Handle both formats: {role, content} and {type, text}
+        for (let i = conversation.length - 1; i >= 0; i--) {
+          const msg = conversation[i];
+          const msgRole = msg.role || msg.type;
+          const msgContent = (msg.content || msg.text || '').trim();
+          
+          console.log(`   [${i}] ${msgRole}: "${msgContent?.substring(0, 50)}..."`);
+          
+          if (msgRole === 'assistant' && msgContent) {
+            // Check if this looks like a real question (not just short feedback)
+            const isActualQuestion = 
+              msgContent.includes('?') || // Has question mark
+              msgContent.length > 30 ||   // Longer than typical feedback
+              msgContent.toLowerCase().startsWith('what') ||
+              msgContent.toLowerCase().startsWith('how') ||
+              msgContent.toLowerCase().startsWith('why') ||
+              msgContent.toLowerCase().startsWith('can you') ||
+              msgContent.toLowerCase().startsWith('tell me') ||
+              msgContent.toLowerCase().startsWith('describe');
+            
+            if (isActualQuestion) {
+              lastQuestion = msgContent;
+              console.log('📌 Found last question from conversation:', lastQuestion?.substring(0, 80) + '...');
+              break;
+            }
+          }
+        }
+      }
+      
+      // Fallback 1: Use currentQuestion from request body
+      if (!lastQuestion && req.body.currentQuestion) {
+        lastQuestion = req.body.currentQuestion;
+        console.log('📌 Using currentQuestion from request:', lastQuestion?.substring(0, 80) + '...');
+      }
+      
+      // Fallback 2: If still no question, check any assistant message
+      if (!lastQuestion && conversation && conversation.length > 0) {
+        for (let i = conversation.length - 1; i >= 0; i--) {
+          const msg = conversation[i];
+          const msgRole = msg.role || msg.type;
+          const msgContent = (msg.content || msg.text || '').trim();
+          
+          if (msgRole === 'assistant' && msgContent && msgContent.length > 10) {
+            lastQuestion = msgContent;
+            console.log('📌 Using fallback assistant message:', lastQuestion?.substring(0, 80) + '...');
+            break;
+          }
+        }
+      }
+      
+      if (lastQuestion) {
+        let responseText;
+        
+        if (isRepeatRequest) {
+          // Repeat the last question with a friendly prefix
+          const repeatPrefixes = [
+            "Sure, let me repeat that: ",
+            "Of course! Here's the question again: ",
+            "No problem, here it is again: ",
+            "Absolutely! ",
+          ];
+          const prefix = repeatPrefixes[Math.floor(Math.random() * repeatPrefixes.length)];
+          responseText = prefix + lastQuestion;
+        } else {
+          // Elaborate/rephrase - use LLM to rephrase the question
+          try {
+            const rephraseResponse = await openai.chat.completions.create({
+              model: 'gpt-4o-mini',
+              messages: [
+                { 
+                  role: 'system', 
+                  content: 'You are an interview assistant. The candidate asked for clarification on a question. Rephrase the question below in a clearer, more detailed way. Keep it as ONE question. Add helpful context if needed but stay focused on the same topic. Do not change the core meaning of the question.'
+                },
+                { 
+                  role: 'user', 
+                  content: `Please rephrase this interview question more clearly:\n\n"${lastQuestion}"\n\nProvide the rephrased question with a brief clarification prefix.`
+                }
+              ],
+              max_tokens: 150,
+              temperature: 0.5,
+            });
+            responseText = rephraseResponse.choices[0].message.content || lastQuestion;
+            // Clean up the response
+            responseText = responseText.replace(/^["']|["']$/g, '').trim();
+          } catch (rephraseErr) {
+            console.error('Rephrase error:', rephraseErr);
+            // Fallback: just repeat with a clarification note
+            responseText = `Let me clarify: ${lastQuestion}`;
+          }
+        }
+        
+        console.log('✅ Responding to clarification request:', responseText.slice(0, 100));
+        
+        // Return in batch format if batchCount was requested, otherwise single response
+        const clarifyBatchCount = Math.max(1, Math.min(Number(req.body.batchCount) || 1, 3));
+        if (clarifyBatchCount > 1) {
+          return res.status(200).json({
+            status: 'success',
+            data: {
+              response: responseText,
+              responses: [responseText],
+              clarificationHandled: true
+            }
+          });
+        }
+        
+        return res.status(200).json({
+          status: 'success',
+          data: {
+            response: responseText,
+            clarificationHandled: true
+          }
+        });
+      } else {
+        // No previous question found, ask them to proceed
+        const fallbackResponse = "I'd be happy to help! Could you please provide your answer or let me know which question you'd like me to clarify?";
+        const clarifyBatchCount = Math.max(1, Math.min(Number(req.body.batchCount) || 1, 3));
+        
+        if (clarifyBatchCount > 1) {
+          return res.status(200).json({
+            status: 'success',
+            data: {
+              response: fallbackResponse,
+              responses: [fallbackResponse],
+              clarificationHandled: true
+            }
+          });
+        }
+        
+        return res.status(200).json({
+          status: 'success',
+          data: {
+            response: fallbackResponse,
+            clarificationHandled: true
+          }
+        });
+      }
+    }
+
     // For follow-up questions, use the normal LLM flow
     // BUILD COMPACT SYSTEM PROMPT WITH JOB PRIORITIZATION
     let systemPrompt = modeConfig.systemPrompt;
@@ -848,9 +1052,18 @@ Reference them when relevant but always relate to the candidate's PAST EXPERIENC
       ? `\n\nOUTPUT FORMAT: Return exactly ${requestedBatchCount} questions separated by "|||" with no numbering, no bullets, and no extra text.`
       : '';
 
-    const userContent = conversationContext 
-      ? `${conversationContext}\n\nThe candidate's latest response was: "${userAnswer}"${batchInstruction}`
-      : `The candidate answered: "${userAnswer}". Ask a follow-up question based on the job requirements ONLY.${batchInstruction}`;
+    // Handle skip request - generate fresh question without referencing user's skip phrase
+    const actualUserAnswer = req.body.userAnswer;
+    const isSkipMode = actualUserAnswer === '[SKIP_REQUEST]';
+    
+    let userContent;
+    if (isSkipMode) {
+      userContent = `The candidate wants to move on to a different topic. Ask a NEW interview question about a different aspect of the job requirements. Do NOT reference the previous question or the candidate's request to skip.${batchInstruction}`;
+    } else if (conversationContext) {
+      userContent = `${conversationContext}\n\nThe candidate's latest response was: "${actualUserAnswer}"${batchInstruction}`;
+    } else {
+      userContent = `The candidate answered: "${actualUserAnswer}". Ask a follow-up question based on the job requirements ONLY.${batchInstruction}`;
+    }
 
     // Call LLM with simplified payload
     let response;
