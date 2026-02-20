@@ -132,10 +132,10 @@ export const createOrder = asyncHandler(async (req, res) => {
     });
   }
 
-  // In non-production environments, default to a fake payment flow
-  // so you can test credits/interviews without a live gateway.
-  // Set ENABLE_FAKE_PAYMENTS="false" to force real Razorpay even in dev.
-  const enableFakePayments = isNonProduction && process.env.ENABLE_FAKE_PAYMENTS !== 'false';
+  // Enable fake payment flow for testing without Razorpay.
+  // Set ENABLE_FAKE_PAYMENTS="true" to skip Razorpay in any environment.
+  // Set ENABLE_FAKE_PAYMENTS="false" or don't set it to force real Razorpay.
+  const enableFakePayments = process.env.ENABLE_FAKE_PAYMENTS === 'true';
 
   if (enableFakePayments) {
     try {
