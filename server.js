@@ -23,6 +23,9 @@ dotenv.config({ path: './.env' });
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Trust proxy - required for Render/Vercel deployment (rate limiting needs real IP)
+app.set('trust proxy', 1);
+
 // Create HTTP server for WebSocket upgrade
 const server = http.createServer(app);
 
